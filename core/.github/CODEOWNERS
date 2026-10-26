@@ -1,0 +1,6 @@
+# Archivos del Core:
+/pom.xml
+/src/main/java/mx/edu/utez/sij/core/
+/src/main/resources/sql/schema.sql
+/src/main/webapp/assets/css/variables.css
+/src/main/webapp/assets/css/layout.css

@@ -1,0 +1,11 @@
+# ==============================================================================
+# Plantilla de Configuración para la Base de Datos
+# INSTRUCCIONES:
+#   1. Haz una copia de este archivo en esta misma carpeta (src/main/resources/)
+#   2. Nómbrala exactamente: db.properties
+#   3. Coloca tu usuario y contraseña local de MySQL.
+#   NOTA: El archivo db.properties está en .gitignore para jamás subir claves a GitHub.
+# ==============================================================================
+db.url=jdbc:mysql://localhost:3306/sij_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=America/Mexico_City
+db.user=root
+db.password=root
