@@ -10,28 +10,52 @@ import mx.edu.utez.sij.core.util.JsonResponseUtil;
 import org.mindrot.jbcrypt.BCrypt;
 
 import java.io.IOException;
-import java.sql.*;
-import java.time.Duration;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
-@WebServlet("/api/auth/login")
+@WebServlet(urlPatterns = {"/api/auth/login", "/api/auth/session"})
 public class LoginServlet extends HttpServlet {
 
     @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        HttpSession session = req.getSession(false);
+        if (session == null || session.getAttribute("idUsuario") == null) {
+            JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_UNAUTHORIZED, false, "Sesión no activa");
+            return;
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("ok", true);
+        data.put("idUsuario", session.getAttribute("idUsuario"));
+        data.put("claveEmpleado", session.getAttribute("claveEmpleado"));
+        data.put("nombreCompleto", session.getAttribute("nombreCompleto"));
+        data.put("correo", session.getAttribute("correo"));
+        data.put("rol", session.getAttribute("rol"));
+        data.put("idJuzgado", session.getAttribute("idJuzgado"));
+        data.put("nombreJuzgado", session.getAttribute("nombreJuzgado"));
+        JsonResponseUtil.sendJson(resp, HttpServletResponse.SC_OK, data);
+    }
+
+    @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        String identificador = req.getParameter("usuario"); // Acepta clave_empleado o correo
+        String identificador = req.getParameter("usuario");
         String password = req.getParameter("password");
 
         if (identificador == null || password == null || identificador.isBlank() || password.isBlank()) {
-            JsonResponseUtil.sendMessage(resp, 400, false, "Ingrese su clave/correo y contraseña.");
+            JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_BAD_REQUEST, false, "Ingrese su clave/correo y contraseña.");
             return;
         }
 
-        String sql = "SELECT id_usuario, clave_empleado, nombre_completo, correo, password, rol, id_juzgado, "
-                + "intentos_fallidos, bloqueado_hasta, activo FROM usuarios "
-                + "WHERE (clave_empleado = ? OR correo = ?) LIMIT 1";
+        String sql = "SELECT u.id_usuario, u.clave_empleado, u.nombre_completo, u.correo, u.password, " +
+                "u.rol, u.id_juzgado, u.intentos_fallidos, u.bloqueado_hasta, u.activo, " +
+                "COALESCE(CONCAT(j.numero_juzgado, ' - ', j.nombre_juzgado), 'Consejo de la Judicatura (Global)') AS nombre_juzgado " +
+                "FROM usuarios u " +
+                "LEFT JOIN juzgados j ON u.id_juzgado = j.id_juzgado " +
+                "WHERE u.correo = ? OR u.clave_empleado = ? LIMIT 1";
 
         try (Connection conn = ConexionMySQL.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -41,89 +65,79 @@ public class LoginServlet extends HttpServlet {
 
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    JsonResponseUtil.sendMessage(resp, 401, false, "Credenciales inválidas.");
-                    return;
-                }
-
-                if (rs.getInt("activo") == 0) {
-                    JsonResponseUtil.sendMessage(resp, 403, false, "Esta cuenta se encuentra inactiva.");
+                    JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_UNAUTHORIZED, false, "Credenciales inválidas.");
                     return;
                 }
 
                 int idUsuario = rs.getInt("id_usuario");
-                int intentosFallidos = rs.getInt("intentos_fallidos");
-                Timestamp bloqueadoTs = rs.getTimestamp("bloqueado_hasta");
-                LocalDateTime ahora = LocalDateTime.now();
+                boolean activo = rs.getBoolean("activo");
+                Timestamp bloqueadoHasta = rs.getTimestamp("bloqueado_hasta");
+                int intentos = rs.getInt("intentos_fallidos");
 
-                // 1. Verificar si está actualmente bloqueado (30 minutos)
-                if (bloqueadoTs != null && bloqueadoTs.toLocalDateTime().isAfter(ahora)) {
-                    long minRestantes = Duration.between(ahora, bloqueadoTs.toLocalDateTime()).toMinutes() + 1;
-                    JsonResponseUtil.sendMessage(resp, 423, false,
-                            "Cuenta bloqueada por seguridad. Intente nuevamente en " + minRestantes + " minutos.");
+                if (!activo) {
+                    JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_FORBIDDEN, false,
+                            "Su cuenta ha sido dada de baja o inactivada por su administrador.");
                     return;
                 }
 
-                // 2. Validar contraseña (soporta texto plano de semilla o hash BCrypt)
-                String storedPass = rs.getString("password");
-                boolean passValida = storedPass.startsWith("$2a$")
-                        ? BCrypt.checkpw(password, storedPass)
-                        : storedPass.equals(password);
+                if (bloqueadoHasta != null && bloqueadoHasta.toLocalDateTime().isAfter(LocalDateTime.now())) {
+                    JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_FORBIDDEN, false,
+                            "Cuenta bloqueada temporalmente por intentos fallidos.");
+                    return;
+                }
 
-                if (!passValida) {
-                    int nuevosIntentos = intentosFallidos + 1;
-                    // Si llega a 3 intentos (o si ya venía de un bloqueo previo >= 3 y falló su único intento extra):
-                    if (nuevosIntentos >= 3) {
-                        String lockSql = "UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = DATE_ADD(NOW(), INTERVAL 30 MINUTE) WHERE id_usuario = ?";
-                        try (PreparedStatement lockPs = conn.prepareStatement(lockSql)) {
-                            lockPs.setInt(1, nuevosIntentos);
-                            lockPs.setInt(2, idUsuario);
-                            lockPs.executeUpdate();
-                        }
-                        JsonResponseUtil.sendMessage(resp, 423, false,
-                                "Límite de intentos excedido. Su cuenta ha sido bloqueada durante 30 minutos.");
-                    } else {
-                        String failSql = "UPDATE usuarios SET intentos_fallidos = ? WHERE id_usuario = ?";
-                        try (PreparedStatement failPs = conn.prepareStatement(failSql)) {
-                            failPs.setInt(1, nuevosIntentos);
-                            failPs.setInt(2, idUsuario);
-                            failPs.executeUpdate();
-                        }
-                        int restantes = 3 - nuevosIntentos;
-                        JsonResponseUtil.sendMessage(resp, 401, false,
-                                "Contraseña incorrecta. Le quedan " + restantes + " intento(s) antes del bloqueo.");
+                String hash = rs.getString("password");
+                boolean validPass = hash != null && hash.startsWith("$2") && BCrypt.checkpw(password, hash);
+
+                if (!validPass) {
+                    int nuevosIntentos = intentos + 1;
+                    String updateFail = nuevosIntentos >= 3
+                            ? "UPDATE usuarios SET intentos_fallidos = ?, bloqueado_hasta = DATE_ADD(NOW(), INTERVAL 30 MINUTE) WHERE id_usuario = ?"
+                            : "UPDATE usuarios SET intentos_fallidos = ? WHERE id_usuario = ?";
+                    try (PreparedStatement psFail = conn.prepareStatement(updateFail)) {
+                        psFail.setInt(1, nuevosIntentos);
+                        psFail.setInt(2, idUsuario);
+                        psFail.executeUpdate();
                     }
+                    JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_UNAUTHORIZED, false,
+                            "Contraseña incorrecta. Intento " + nuevosIntentos + " de 3.");
                     return;
                 }
 
-                // 3. Login exitoso -> Reiniciar intentos y bloqueo
-                try (PreparedStatement resetPs = conn.prepareStatement(
+                try (PreparedStatement psReset = conn.prepareStatement(
                         "UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?")) {
-                    resetPs.setInt(1, idUsuario);
-                    resetPs.executeUpdate();
+                    psReset.setInt(1, idUsuario);
+                    psReset.executeUpdate();
                 }
 
                 String rol = rs.getString("rol");
+                Object idJuzgadoObj = rs.getObject("id_juzgado");
+
                 HttpSession session = req.getSession(true);
                 session.setAttribute("idUsuario", idUsuario);
                 session.setAttribute("claveEmpleado", rs.getString("clave_empleado"));
                 session.setAttribute("nombreCompleto", rs.getString("nombre_completo"));
+                session.setAttribute("correo", rs.getString("correo"));
                 session.setAttribute("rol", rol);
-                session.setAttribute("idJuzgado", rs.getObject("id_juzgado"));
+                session.setAttribute("idJuzgado", idJuzgadoObj);
+                session.setAttribute("nombreJuzgado", rs.getString("nombre_juzgado"));
 
-                String redirectUrl = rol.startsWith("ADMIN")
+                String redirectUrl = (rol.equals("SUPER_ADMIN") || rol.startsWith("ADMIN_"))
                         ? req.getContextPath() + "/views/admin/index.html"
                         : req.getContextPath() + "/views/dashboard/index.html";
 
-                Map<String, Object> data = new HashMap<>();
-                data.put("ok", true);
-                data.put("rol", rol);
-                data.put("nombreCompleto", rs.getString("nombre_completo"));
-                data.put("claveEmpleado", rs.getString("clave_empleado"));
-                data.put("redirectUrl", redirectUrl);
-                JsonResponseUtil.sendJson(resp, 200, data);
+                Map<String, Object> respMap = new HashMap<>();
+                respMap.put("ok", true);
+                respMap.put("rol", rol);
+                respMap.put("claveEmpleado", rs.getString("clave_empleado"));
+                respMap.put("nombreCompleto", rs.getString("nombre_completo"));
+                respMap.put("nombreJuzgado", rs.getString("nombre_juzgado"));
+                respMap.put("redirectUrl", redirectUrl);
+                JsonResponseUtil.sendJson(resp, HttpServletResponse.SC_OK, respMap);
             }
-        } catch (SQLException e) {
-            JsonResponseUtil.sendMessage(resp, 500, false, "Error interno de base de datos: " + e.getMessage());
+        } catch (Exception e) {
+            JsonResponseUtil.sendMessage(resp, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, false,
+                    "Error en servidor: " + e.getMessage());
         }
     }
 }
