@@ -71,15 +71,15 @@ INSERT IGNORE INTO materias (id_materia, nombre_materia) VALUES
 
 INSERT IGNORE INTO distritos (id_distrito, nombre_distrito, municipio_cabecera, id_distrito_cercano) VALUES
                                                                                                          (1, 'Distrito 1 - Cuernavaca Sede Central (Atlacomulco)', 'Cuernavaca', NULL),
-                                                                                                         (2, 'Distrito 1 - Cuernavaca Sede Norte (Chamilpa)', 'Cuernavaca', 1),
-                                                                                                         (3, 'Distrito 1 - Cuernavaca Sede Ciudad Judicial', 'Cuernavaca', 1),
-                                                                                                         (4, 'Distrito 2 - Xochitepec', 'Xochitepec', 1),
+                                                                                                         (2, 'Distrito 2 - Xochitepec', 'Xochitepec', 1),
+                                                                                                         (3, 'Distrito 1 - Cuernavaca Sede Norte (Chamilpa)', 'Cuernavaca', 1),
+                                                                                                         (4, 'Distrito 1 - Cuernavaca Ciudad Judicial', 'Cuernavaca', 1),
                                                                                                          (5, 'Distrito 3 - Temixco', 'Temixco', 1),
                                                                                                          (6, 'Distrito 4 - Cuautla', 'Cuautla', 1);
 
 INSERT IGNORE INTO juzgados (id_juzgado, numero_juzgado, nombre_juzgado, id_distrito, id_materia) VALUES
                                                                                                       (1, 'J01-CVA', 'Juzgado Primero Familiar de Cuernavaca', 1, 1),
-                                                                                                      (2, 'J02-CVA', 'Juzgado Segundo Civil de Cuernavaca', 2, 3),
-                                                                                                      (3, 'J03-CVA', 'Juzgado Tercero Penal de Cuernavaca', 3, 4),
-                                                                                                      (4, 'J04-XOC', 'Juzgado Primero de Violencia Familiar (Xochitepec)', 4, 2),
+                                                                                                      (2, 'J02-XOC', 'Juzgado Segundo Violencia (Xochitepec)', 2, 2),
+                                                                                                      (3, 'J03-CVA', 'Juzgado Segundo Civil de Cuernavaca', 3, 3),
+                                                                                                      (4, 'J04-CVA', 'Juzgado Tercero Penal de Cuernavaca', 4, 4),
                                                                                                       (5, 'J05-TEM', 'Juzgado Mixto de Primera Instancia (Temixco)', 5, 1);
